@@ -1,0 +1,133 @@
+---
+title: "CourseProject: Human Activity Recognition"
+author: "MoritzoTheCoder"
+date: "25. Oktober 2015"
+output: html_document
+---
+## Introduction
+
+This is a statistical report submitted as final project in the *MOOC 'Practical Machine Learning'* offered by the Bloomberg School of Public Health at Johns Hopkins University via the platform Coursera.
+The *issue of this report is applying machine learning algorithms* on given data set of Human Activity Recognition sensors to classify certain conductions of a predifined weight lifting task.
+
+## Background & Data Source
+
+This report builds on research conducted by Velloso, Bulling, Gellersen, Ugulino & Fuks (2013).
+According to the project's [website](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset) the underlying research can be summarized as follows:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal was to **use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants while performing a weight lifting task**.
+
+### Sample & Procedure
+The exercises were performed by *six male participants aged between 20-28 years*, with little weight lifting experience. It was made sure that all participants could easily simulate the mistakes in a safe and controlled manner by using a relatively light dumbbell (1.25kg). The task and the corresponding outcome classification was in detail:
+Participants were asked to *perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions*: exactly according to the specification *(Class A)*, throwing the elbows to the front *(Class B)*, lifting the dumbbell only halfway *(Class C)*, lowering the dumbbell only halfway *(Class D)* and throwing the hips to the front *(Class E)*.
+
+
+## Exploration & Preprocessing
+
+The project's website provides two spreadsheet files (*.csv) containing the training and the testing data set with identical variables but different cases, which are downloaded and read into the R-workspace.
+```{r loading-data, eval=T, echo=T}
+    setwd("~/Desktop/Coursera_DataScience/8_PracticalMachineLearning/CourseProject_MachineLearning")
+    training <- read.csv("pml-training.csv", na.strings=c("", "NA", "#DIV/0!"), sep=",")
+    testing <- read.csv("pml-testing.csv", na.strings=c("", "NA", "#DIV/0!"), sep=",")
+```
+The outcome of interest is a factor variable with five levels which correspond to the labels of five different categories for performing the weight lifting excercise (see the project's webpage).
+```{r outcome, eval=T, echo=T}
+    class(training$classe)
+    table(training$classe)
+```
+Since the outcome variable is categorical the task is to find an algorithm for a **classification problem**.
+Most predictors are quantitative variables which contain measurements from sensors attached to the waist, arm, forearm and dumbbells with respect to the metric accelaration. The selection of the predictors among those many variables is performed in the following subsection.
+
+### Checking for Missing Values and Cleaning the Data Set
+A look in the spreadcheet reveals that there are many variables in the training set which contain almost only missing values:
+```{r check-for-missings, eval=T, echo=T}
+    table(colSums(is.na(training))) # How many variables are usable with regard to missing values?
+```
+In addition some variables are obviously not useful for prediction, namely 'x', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', and 'num_window' (columns 1 to 7). All those columns are dropped by subsetting the training data set.
+```{r cleaning-data, eval=T, echo=T}
+    index <- which(colSums(is.na(training)) == 0)
+    index <- index[-c(1,2,3,4,5,6,7)]
+    training <- training[,index]
+```
+
+The preprocessed, clean data set now only consists of the outcome variable 'classe' (which is to be predicted) and `r length(index)-1` remaining variables as potentially useful predictors.
+
+### Subsampling for Cross Validation
+Before perfoming a machine learning algorithm one has to split the training data into one subsample for actual training and building the model and one (smaller) subsample which can than be used for cross validation:
+```{r subsampling-data, eval=T, echo=T}
+    library(caret)
+    index.subsamples <- createDataPartition(y=training$classe, p=0.75, list=FALSE)
+    training.sub <- training[index.subsamples, ] 
+    testing.sub <- training[-index.subsamples, ]
+```
+
+
+## Modelling, Prediction & Cross-Validation
+
+### Modelling Approach 1: Tree Model
+Since there is a classification problem a relatively simple **tree algorithm** (applying the 'rpart' function from the caret package) is chosen as a first modelling approach:
+```{r model-tree, eval=T, echo=T}
+    library(rpart)
+    model.rpart <- train(classe ~ ., data=training.sub, method="rpart")
+    model.rpart
+```
+As one can see the accuracy of around 50% of this 'simple' tree model is poor. We should try a more complex approach and fit another model.
+
+
+### Modelling Approach 2:Random Forest
+As a second modelling approach the boot strapping method '**random forrest**' is applied. 
+*Note:* Since this algorithm requires quite a lot time for computation the number of folds for cross validation is limited to 4 (instead of the default value '10') by applying the 'trainControl' function:
+```{r model-forrest-train, eval=T, echo=T}
+    library(randomForest) 
+    setControl <- trainControl(method = "cv", number = 4, allowParallel = TRUE) 
+    set.seed(300)
+    model.rf <- train(classe ~ ., data=training.sub, method="rf", trControl = setControl )
+```
+
+```{r model-forrest-results, eval=T, echo=T}
+    model.rf$finalModel # Shows the confusion matrix
+```
+As one can see from the output the random forrest model has an **almost perfect fit** or in other words shows an **in-sample-error** of only under 1%.
+
+**Cross Validation:**
+This model is than cross validated against the test subset sampled from the same original training data set:
+```{r model-forrest-prediction, eval=T, echo=T}
+    Prediction.test <- predict(model.rf$final, newdata=testing.sub) # Predictions on test subsample data
+    confusionMatrix(Prediction.test, testing.sub$classe) # Visualize Output
+
+```
+As one can see from confusion matrix statistics the model predicts highly accurate values when applied to the testing subsample - the **out-of-sample-error** is still < 1% !
+
+### Conclusion
+The **random forrest algorith has proofed to be a very useful model** for prediction the class of action by a number of measurement data from (accelaration) sensors attached to the body of the participants while perfomring the weight lifting task. The more simple tree model had very bad accuracy and has shown not to be useful.
+
+## Predictions on New Data
+In this final step the original *test* set provided by the reseracher on their webpage comes into play.
+It contains 20 new cases and the same variables as the training data set (thus, identical subsetting will be a necessary preprocessing step).
+```{r testing-preprocessing, eval=F, echo=T}
+    testing <- testing[,index]
+    testing <- testing[,-53] # Here the last column ('problem_id') is removed.
+```
+The predictions are created by applying the random forrest model fitted above to the provided test data set:
+```{r testing, eval=F, echo=T}
+    Prediction.testing <- predict(model.rf, testing)
+    Prediction.testing <- as.character(Prediction.testing)
+    Prediction.testing
+```
+These 20 characters represent the classification for the 20 cases with respect to the class of action.
+
+According to the recommendations by the course instructor the predicted classes for the 20 test cases are stored each in separate text file which can than be uploaded through the submission section on the Coursera website for automated grading.
+```{r save-predictions, eval=F, echo=T}
+    pml_write_files = function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, 
+            col.names = FALSE)
+        }
+    }
+
+    pml_write_files(Prediction.testing)
+```
+
+## Literature
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. *Qualitative Activity Recognition of Weight Lifting Exercises.* Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
